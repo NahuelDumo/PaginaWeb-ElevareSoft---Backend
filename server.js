@@ -234,6 +234,14 @@ app.put('/api/proposals/:id', authenticateToken, async (req, res) => { // Added 
             }
             else if (action === 'accept_mod') {
                 const mod = data.pending_modification;
+                
+                // VALIDACIÓN: El proposer no puede aprobar su propia modificación
+                if (mod.proposer === user_email) {
+                    return res.status(403).json({ 
+                        error: "No puedes aprobar tu propia modificación. Debe ser aprobada por otros usuarios." 
+                    });
+                }
+                
                 data.historial.push({ action: 'accept_mod', user_email, timestamp, details: "Modificación aplicada." });
                 if (!data.modification_notes) data.modification_notes = [];
                 data.modification_notes.push(`Cambio aplicado (${new Date().toLocaleDateString()}): ${mod.reason}`);
@@ -241,6 +249,15 @@ app.put('/api/proposals/:id', authenticateToken, async (req, res) => { // Added 
                 await sendDiscordNotification(clientName, { id: id, ...data }, "Modificación Aplicada", "Cambios integrados.");
             }
             else if (action === 'reject_mod') {
+                const mod = data.pending_modification;
+                
+                // VALIDACIÓN: El proposer no puede rechazar su propia modificación
+                if (mod.proposer === user_email) {
+                    return res.status(403).json({ 
+                        error: "No puedes rechazar tu propia modificación. Debe ser evaluada por otros usuarios." 
+                    });
+                }
+                
                 data.historial.push({ action: 'reject_mod', user_email, timestamp, details: text });
                 delete data.pending_modification;
             }
@@ -293,8 +310,8 @@ app.put('/api/proposals/:id', authenticateToken, async (req, res) => { // Added 
     }
 });
 
-// DELETE
-app.delete('/api/proposals/:id', async (req, res) => {
+// DELETE (Protected)
+app.delete('/api/proposals/:id', authenticateToken, async (req, res) => {
     try {
         await query('DELETE FROM proposals WHERE id = $1', [req.params.id]);
         res.json({ message: 'Deleted' });
