@@ -21,8 +21,33 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
+const corsOptions = {
+  origin: [
+    'https://elevaresoft.com.ar',
+    'https://www.elevaresoft.com.ar'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+
+
+
+
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    crossOriginEmbedderPolicy: false
+  })
+);
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // 👈 CLAVE
+
 app.use(helmet()); // Secure HTTP Headers
-app.use(cors()); // TODO: Restrict this to your frontend domain in production
+
 app.use(express.json());
 
 // Rate Limiter for Auth Routes (Prevents Brute Force)
@@ -31,7 +56,13 @@ const authLimiter = rateLimit({
     max: 50, // limit each IP to 50 requests per windowMs
     message: "Too many login attempts from this IP, please try again after 15 minutes"
 });
-app.use('/api/auth/', authLimiter);
+app.use('/api/auth', (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  return authLimiter(req, res, next);
+});
+
 
 // Helper: Discord Notification
 async function sendDiscordNotification(clientName, proposal, title, description = "") {
