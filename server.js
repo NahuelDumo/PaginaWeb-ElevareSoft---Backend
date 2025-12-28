@@ -3,6 +3,7 @@ const cors = require('cors');
 const { query } = require('./db');
 const crypto = require('crypto');
 const fetch = require('node-fetch'); // ensuring v2 is installed for require
+const { sendResetPasswordEmail } = require('./email-service');
 
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -145,6 +146,92 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+// POST /api/auth/forgot-password
+app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ error: "Email requerido" });
+
+        // Find User
+        const result = await query('SELECT * FROM users WHERE email = $1', [email]);
+        if (result.rows.length === 0) {
+            // We return 200 even if user not found for security reasons (don't reveal users)
+            return res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
+        }
+
+        const user = result.rows[0];
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 3600000); // 1 hour
+
+        // Save token to DB
+        await query(
+            'UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3',
+            [token, expires, user.id]
+        );
+
+        // Send Email
+        await sendResetPasswordEmail(email, token);
+
+        res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Error al procesar la solicitud de recuperación." });
+    }
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        console.log("DEBUG: Reset password request received");
+        console.log("DEBUG: Token:", token);
+
+        if (!token || !password) {
+            console.log("DEBUG: Missing token or password");
+            return res.status(400).json({ error: "Token y nueva contraseña requeridos" });
+        }
+
+        // Find user by token
+        const result = await query(
+            'SELECT * FROM users WHERE reset_token = $1',
+            [token]
+        );
+
+        if (result.rows.length === 0) {
+            console.log("DEBUG: Token not found in DB.");
+            return res.status(400).json({ error: "Token inválido o expirado." });
+        }
+
+        const user = result.rows[0];
+        const now = new Date();
+        const expires = new Date(user.reset_token_expires);
+
+        console.log("DEBUG: Current time (Server):", now.toISOString());
+        console.log("DEBUG: Token expiry (DB):", expires.toISOString());
+
+        if (expires < now) {
+            console.log("DEBUG: Token has expired.");
+            return res.status(400).json({ error: "El token ha expirado. Por favor, solicita uno nuevo." });
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Update password and clear token
+        await query(
+            'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+            [hashedPassword, user.id]
+        );
+
+        res.json({ message: "Contraseña actualizada exitosamente." });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Error al restablecer la contraseña." });
+    }
+});
+
 // GET /api/auth/me
 app.get('/api/auth/me', authenticateToken, (req, res) => {
     res.json(req.user);
@@ -234,14 +321,14 @@ app.put('/api/proposals/:id', authenticateToken, async (req, res) => { // Added 
             }
             else if (action === 'accept_mod') {
                 const mod = data.pending_modification;
-                
+
                 // VALIDACIÓN: El proposer no puede aprobar su propia modificación
                 if (mod.proposer === user_email) {
-                    return res.status(403).json({ 
-                        error: "No puedes aprobar tu propia modificación. Debe ser aprobada por otros usuarios." 
+                    return res.status(403).json({
+                        error: "No puedes aprobar tu propia modificación. Debe ser aprobada por otros usuarios."
                     });
                 }
-                
+
                 data.historial.push({ action: 'accept_mod', user_email, timestamp, details: "Modificación aplicada." });
                 if (!data.modification_notes) data.modification_notes = [];
                 data.modification_notes.push(`Cambio aplicado (${new Date().toLocaleDateString()}): ${mod.reason}`);
@@ -250,14 +337,14 @@ app.put('/api/proposals/:id', authenticateToken, async (req, res) => { // Added 
             }
             else if (action === 'reject_mod') {
                 const mod = data.pending_modification;
-                
+
                 // VALIDACIÓN: El proposer no puede rechazar su propia modificación
                 if (mod.proposer === user_email) {
-                    return res.status(403).json({ 
-                        error: "No puedes rechazar tu propia modificación. Debe ser evaluada por otros usuarios." 
+                    return res.status(403).json({
+                        error: "No puedes rechazar tu propia modificación. Debe ser evaluada por otros usuarios."
                     });
                 }
-                
+
                 data.historial.push({ action: 'reject_mod', user_email, timestamp, details: text });
                 delete data.pending_modification;
             }
