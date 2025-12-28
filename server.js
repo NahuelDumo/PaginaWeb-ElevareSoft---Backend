@@ -21,21 +21,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-const corsOptions = {
-  origin: [
-    'https://elevaresoft.com.ar',
-    'https://www.elevaresoft.com.ar'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 204
-};
-
-
-
-
-
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -43,10 +28,32 @@ app.use(
   })
 );
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // 👈 CLAVE
+const corsOptions = {
+  origin: [
+    'https://elevaresoft.com.ar',
+    'https://www.elevaresoft.com.ar'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
 
-app.use(helmet()); // Secure HTTP Headers
+
+app.use(cors(corsOptions));
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (corsOptions.origin.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
+    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json());
 
